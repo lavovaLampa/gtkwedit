@@ -1,8 +1,8 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
-from enum import Enum, auto
+from enum import Enum
 from pathlib import Path
-from typing import Any, Final, Generic, Literal, Optional, TypeAlias, TypedDict, TypeVar
+from typing import Final, Generic, Optional, TypeAlias, TypedDict, TypeVar
 
 from typing_extensions import NotRequired, Unpack
 from vcd.gtkw import GTKWColor as Color, GTKWFlag, GTKWSave
@@ -11,6 +11,7 @@ T = TypeVar("T", bound="Trace | NestedTrace")
 
 
 class DataFmt(Enum):
+    """Trace display data format"""
     HEX = "hex"
     DEC = "dec"
     BIN = "bin"
@@ -21,33 +22,53 @@ class DataFmt(Enum):
 
 
 class RootStyle(TypedDict):
+    """Root/top trace style (must specify data format and right justification state)"""
     color: NotRequired[Optional[Color]]
+    """Trace color"""
     datafmt: DataFmt
+    """Trace data format"""
     rjustify: bool
+    """Right justify displayed trace data?"""
     extraflags: NotRequired[Optional[GTKWFlag]]
+    """Extra flags (can be ORed)"""
 
 
 class Style(TypedDict, total=False):
+    """Trace style"""
     color: Optional[Color]
+    """Trace color"""
     datafmt: DataFmt
+    """Trace data format"""
     rjustify: bool
+    """Right justify displayed trace data?"""
     extraflags: Optional[GTKWFlag]
+    """Extra flags (can be ORed)"""
 
 
 @dataclass(frozen=True)
 class Styled(Generic[T]):
+    """Childrent inherit specified style"""
     children: Sequence[T] | T
+    """Sequence of childrent that will inherit specified style"""
     style: Style
+    """Trace style"""
 
 
 @dataclass(frozen=True)
 class Signal:
+    """Signal trace"""
     name: str
+    """Signal name"""
     alias: Optional[str] = None
+    """Display alias (if any)"""
     highlight: bool = False
+    """Highlight signal by default?"""
     style: Optional[Style] = None
+    """Signal style"""
     translate_filter_file: Optional[str] = None
+    """Translate filter file to use (if any)"""
     translate_filter_process: Optional[str] = None
+    """Translate filter process to use (if any)"""
 
 
 @dataclass(frozen=True)
@@ -59,25 +80,38 @@ class Submodule(Generic[T]):
 
 @dataclass(frozen=True)
 class Group:
+    """Trace group"""
     name: str
+    """Group name"""
     # Groups cannot be nested
     children: "Sequence[NestedTrace] | NestedTrace"
+    """Group children (groups cannot be nested)"""
     closed: bool = False
+    """Closed group by default?"""
     highlight: bool = False
+    """Higlight group by default?"""
     style: Optional[Style] = None
+    """Group trace style"""
 
 
 @dataclass(frozen=True)
 class Blank:
+    """Blank trace"""
     analog_extend: bool = False
+    """Analog extend previous defined trace?"""
     highlight: bool = False
+    """Highlight blank by default?"""
 
 
 @dataclass(frozen=True)
 class Comment:
+    """Comment trace"""
     comment: str
+    """Comment string"""
     analog_extend: bool = False
+    """Analog extend previous defined trace?"""
     highlight: bool = False
+    """Highlight blank by default?"""
 
 
 NestedTrace: TypeAlias = (
@@ -86,6 +120,7 @@ NestedTrace: TypeAlias = (
 Trace: TypeAlias = (
     str | Signal | Submodule["Trace"] | Group | Comment | Blank | Styled["Trace"]
 )
+AnyTrace: TypeAlias = NestedTrace | Trace
 
 _ROOT_STYLE: Final[RootStyle] = RootStyle(datafmt=DataFmt.HEX, rjustify=True)
 
@@ -106,7 +141,7 @@ def _merge_style(parent: RootStyle, own: Optional[Style]) -> RootStyle:
 
 def _traverse_dom(
     save: GTKWSave,
-    dom: Sequence[T] | T,
+    dom: Sequence[AnyTrace] | AnyTrace,
     parent_style: RootStyle,
     parent_path: Optional[str],
 ) -> None:
@@ -151,6 +186,10 @@ def _traverse_dom(
                     translate_filter_process,
                 )
 
+            case Styled(children, style):
+                style = _merge_style(parent_style, style)
+                _traverse_dom(save, children, style, parent_path)
+
             # Implicit signal name
             case str():
                 save.trace(
@@ -185,7 +224,7 @@ def write_gtkw_file(
     root_module: Optional[str] = None,
     **kwargs: Unpack[Options],
 ) -> None:
-    """
+    """Create a new gtkw save file.
 
     Args:
         file_name:      `.gtkw` file path
